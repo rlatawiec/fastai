@@ -1,14 +1,12 @@
 # -*- coding: utf-8 -*-
 import dash
-from dash.dependencies import Input, Output
 import dash_core_components as dcc
 import dash_html_components as html
+from dash.dependencies import Input, Output, State
 
-from app_content import img_tab, model_tab, video_tab
-
-# external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
-
-app = dash.Dash(__name__)  # external_stylesheets=external_stylesheets
+import callbacks
+from content import img_tab, model_tab, video_tab
+from server import app
 
 app.layout = html.Div(children=[
     html.Div([
@@ -33,14 +31,13 @@ app.layout = html.Div(children=[
 ])
 
 @app.callback(Output("tab_content", "children"), [Input("tabs", "value")])
-def render_content(tab):
+def display_page(tab):
     if tab == "img_tab":
         return img_tab()
     elif tab == "model_tab":
         return model_tab()
     elif tab == "video_tab":
         return video_tab()
-
-
+    
 if __name__ == '__main__':
     app.run_server(debug=True)
