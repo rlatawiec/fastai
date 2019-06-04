@@ -1,4 +1,3 @@
-import base64
 from dash.dependencies import Input, Output, State
 import dash_html_components as html
 
@@ -17,11 +16,8 @@ def update_output(list_of_contents, list_of_names, list_of_dates):
         return parse_contents(list_of_contents, list_of_names, list_of_dates)
     
 def parse_contents(contents, filename, date):
-#     content_type, content_string = contents.split(',')
-#     decoded = base64.b64decode(content_string)
     
     return html.Div([
         html.H5(filename),
-#         html.Img(src='data:image/png;base64,{}'.format(decoded)),
         html.Img(src=contents)
     ])

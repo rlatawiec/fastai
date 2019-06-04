@@ -10,7 +10,7 @@ from server import app
 
 app.layout = html.Div(children=[
     html.Div([
-        html.Span("App - img visualisation", className='app-title')
+        html.Span("fast.ai visualisation tool", className='app-title')
     ], className="row header"),
     
     html.Div([
@@ -40,4 +40,4 @@ def display_page(tab):
         return video_tab()
     
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run_server(debug=True, port=8123)
