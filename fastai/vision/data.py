@@ -30,7 +30,8 @@ __all__ = ['COCO_download', 'COCO_load', 'get_image_files', 'denormalize', 'get_
            'ImageList', 'normalize', 'normalize_funcs', 'resize_to',
            'channel_view', 'mnist_stats', 'cifar_stats', 'imagenet_stats', 'download_images',
            'verify_images', 'bb_pad_collate', 'ImageImageList', 'PointsLabelList',
-           'ObjectCategoryList', 'ObjectItemList', 'SegmentationLabelList', 'SegmentationItemList', 'PointsItemList', 'COCODataset']
+           'ObjectCategoryList', 'ObjectItemList', 'SegmentationLabelList', 'SegmentationItemList', 'PointsItemList',
+           'clip_annotations', 'COCODataset']
 
 image_extensions = set(k for k,v in mimetypes.types_map.items() if v.startswith('image/'))
 
@@ -143,6 +144,7 @@ def make_dataset_dirs(dataset_command, path):
             print('Invalid dataset - enter either all, train or valid.')
             return []
 
+
 def COCO_load(root_dir, train_annot=False, valid_annot=False, tfms=[], resize=608, batch_size=4):
     """
     Args:
@@ -177,9 +179,37 @@ def COCO_load(root_dir, train_annot=False, valid_annot=False, tfms=[], resize=60
     all_objects = (ObjectItemList.from_folder(root_dir).split_by_folder()
                    .label_from_func(get_y_func)
                    .transform(tfms, tfm_y=True, size=resize)
-                   .databunch(bs=batch_size, collate_fn=bb_pad_collate)
-                   .normalize())
+                   .databunch(bs=batch_size, collate_fn=bb_pad_collate))
     return all_objects
+
+
+def clip_annotations(images_path, annotations_file):
+    images = os.listdir(images_path)
+    towrite = {}
+    with open(annotations_file) as file:
+        annots = json.load(file)
+    towrite['info'] = annots['info']
+    towrite['licenses'] = annots['licenses']
+    towrite['images'] = []
+    ids = set()
+    removed = [0, 0]
+    for im in annots['images']:
+        if im['file_name'] in images:
+            towrite['images'].append(im)
+            ids.add(im['id'])
+        else:
+            removed[0] += 1
+    towrite['annotations'] = []
+    for an in annots['annotations']:
+        if an['image_id'] in ids:
+            towrite['annotations'].append(an)
+        else:
+            removed[1] += 1
+    towrite['categories'] = annots['categories']
+    with open('{}_clipped.json'.format(annotations_file[:-5]), 'w') as file:
+        json.dump(towrite, file)
+    print('Clipped json file was written to file! {} images and {} annotations were removed'.format(*removed))
+
 
 def download_open_images(Dataset=None, classes=['Violin'], command='downloader', image_IsDepiction=None, image_IsGroupOf=None, image_IsInside=None, image_IsOccluded=None, image_IsTruncated=None, limit=None, multiclasses='0', n_threads=None, noLabels=False, sub=None, type_csv='validation'):
     'Wrapper on OID package'
@@ -605,6 +635,7 @@ class ImageImageList(ImageList):
             y.show(ax=axs[i,2], **kwargs)
             z.show(ax=axs[i,1], **kwargs)
 
+            
 class COCODataset(Dataset):
     """Common Objects in Context dataset."""
 
@@ -627,6 +658,7 @@ class COCODataset(Dataset):
                 self.image_id_to_bbox_id[self.bbox[i]['image_id']] = [i]
         for anomaly in set(self.images_ids).difference(set(self.image_id_to_bbox_id.keys())):
             self.image_id_to_bbox_id[anomaly] = []
+
         self.images_ids = list(self.images.keys())
         self.categories = {i['id']: i['name'] for i in self.json['categories']}
 
