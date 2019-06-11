@@ -71,14 +71,18 @@ def test_rewrite_bboxes(n=5, b=6):
         assert image[1].size(0) == non
 
 
-@pytest.mark.parametrize("pretrained", {False})
+@pytest.mark.parametrize("pretrained", {True})
 def test_YOLOv3(pretrained, width=128, height=128, batch_size=2):
     model_name = 'yolov3'
     image = torch.randn([batch_size, 3, width, height])
     net = YOLOv3(model_name, pretrained=pretrained)
+    print(len(net.modules_list))
+    print(net.modules_list[0][0].weight[-1])
+    '''
     detection = net(image)
     # assert detection.shape == torch.Size([batch_size, 22743, 85])
     print(len(detection))
     print(type(detection))
     print(detection[0].shape)
     print(detection[1].shape)
+    '''

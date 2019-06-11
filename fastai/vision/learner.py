@@ -8,6 +8,7 @@ from ..callback import *
 from ..layers import *
 from ..callbacks.hooks import *
 from ..train import ClassificationInterpretation
+from .data import *
 
 __all__ = ['cnn_learner', 'create_cnn', 'create_cnn_model', 'create_body', 'create_head', 'unet_learner', 'yolo_learner']
 # By default split models between first and second layer
@@ -215,6 +216,13 @@ def yolo_learner(data:DataBunch, loss_func=None, model_name:str='yolov3', pretra
     learn = Yolo_Learner(data, model)
     return learn
 
+def make_batches(images, batch_size=5):
+
+    data = images[0].data
+    for image in images[1:]:
+        data = torch.cat()
+
+
 
 class Yolo_Learner():
 
@@ -223,31 +231,45 @@ class Yolo_Learner():
         self.data = data
         self.model = model
         self.classes = {number: name for name, number in data.train_dl.y.c2i.items()}
+        self.img_size = 608
+        self.batch_size = 5
 
     def predict(self, images=None, confidence=0.5, nms_conf=0.4):
 
-        self.prediction = []
+        self.model.eval()
+        predictions = []
+        confidences = []
         if images is None:
             print('Prediction of images from valid dataset')
             num_images = 0
             for x, y in self.data.valid_dl:
-                self.prediction += models.rewrite_results(self.model(x), confidence, nms_conf, nonzero_only=True)
+                boxes, confs, labels = models.rewrite_results(self.model(x.data), confidence, nms_conf, nonzero_only=True)
+                for box, label in zip(boxes, labels):
+                    if label is not None:
+                        predictions.append(ImageBBox.create(x.size(3), x.size(2), box, labels=label, classes=self.classes))
+                    else:
+                        predictions.append(None)
+                confidences += confs
                 num_images += x.size(0)
         else:
-            num_images = images.size(0)
-            self.prediction += models.rewrite_results(self.model(images), confidence, nms_conf, nonzero_only=True)
-
+            num_images = len(images)
+            predicted = models.rewrite_results(self.model(images), confidence, nms_conf, nonzero_only=True)
+            predictions.append(ImageBBox(*images.size(3), images.size(2), predicted[0], labels=predicted[1],
+                                         classes=[self.classes[int(i)] for i in predicted[1]]))
         self.images = images
+        #self.prediction = ObjectCategoryList(predictions, classes=set(self.classes.values()))
+        self.prediction = predictions
 
         print('Predicted {} images'.format(num_images))
 
     def show_results(self, num=100, rows=3, figsize=(5, 5)):
 
-        num_images = [len(batch) for batch in self.prediction]
+        num_images = len(self.prediction)
         if self.images is None:
             if len(self.data.valid_ds.y) > num:
                 self.plot_batch([self.data.valid_ds.x[i] for i in range(num)],
-                                [self.data.valid_ds.y[i] for i in range(num)], self.prediction[:num], rows, figsize)
+                                [self.data.valid_ds.y[i] for i in range(num)], [self.prediction[i] for i in range(num)],
+                                rows, figsize)
             else:
                 self.plot_batch(self.data.valid_ds.x, self.data.valid_ds.y, self.prediction, rows, figsize)
         else:
@@ -264,16 +286,16 @@ class Yolo_Learner():
             rows = len(x)
         cols = math.ceil(len(x) / rows)
         fig, axs = plt.subplots(rows, cols)
-        try:
-            axs = [a for aa in axs for a in aa]
-        except TypeError:
-            pass
-        for image, target, predictions, ax in zip(x, y, preds, axs[:len(x)]):
-            ax.imshow(image.data.transpose(0, 2).transpose(0, 1))
+        for image, target, pred, ax in zip(x, y, preds, axs.flatten()[:len(x)]):
+            if pred is not None:
+                image.show(ax=ax, y=pred)
+            else:
+                image.show(ax=ax)
+            #ax.imshow(image.data.transpose(0, 2).transpose(0, 1))
             # colors = iter(plt.cm.rainbow(np.linspace(0, 1, len(predictions))))
-            self.plot_boxes(*predictions, ax, color='orange')
-            if target is not None:
-                self.plot_boxes(*target.data, ax, color='green', constant_conf=1)
+            #self.plot_boxes(*predictions, ax, color='orange')
+            #if target is not None:
+                #self.plot_boxes(*target.data, ax, color='green', constant_conf=1)
         plt.show()
 
     def plot_boxes(self, boxes, classes, ax, color='blue', constant_conf=None):

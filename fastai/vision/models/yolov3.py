@@ -281,13 +281,17 @@ def rewrite_results(detections, confidence, nms_conf, nonzero_only=True):
     assert len(outputs) == batch_size
 
     if nonzero_only:
-        images = []
+        bboxes, confs, labels = [], [], []
         for output in outputs:
             if output is not None:
-                images.append((output[:, :5].detach(), output[:, -1].detach()))
+                bboxes.append(output[:, :4].detach())
+                confs.append(output[:, 4].detach())
+                labels.append([int(l) for l in output[:, -1].detach()])
             else:
-                images.append((torch.zeros(0, 5, requires_grad=False), torch.zeros(0, requires_grad=False)))
-        return images
+                bboxes.append(torch.zeros(0, 4, requires_grad=False))
+                confs.append(None)
+                labels.append(None)
+        return bboxes, confs, labels
     else:
         output_bboxes = torch.zeros(batch_size, max_bbox, 5, requires_grad=False)
         output_classes = torch.zeros(batch_size, max_bbox, requires_grad=False)
@@ -329,13 +333,15 @@ def yolo_loss(input, target, lambda_coords, lambda_noobj):
 
 class YOLOv3(nn.Module):
 
-    def __init__(self, model_name='yolov3', pretrained=False):
+    def __init__(self, model_name='yolov3', pretrained=False, weight_file=None):
         super(YOLOv3, self).__init__()
         self.blocks, self.net_info = parse_cfg(model_name)
         self.inp_dims = torch.Size([int(self.net_info['width']), int(self.net_info['height'])])
         self.modules_list = create_modules(self.blocks, self.inp_dims)
         if pretrained:
-            self.header = self.load_weights(model_name)
+            if weight_file is None:
+                weight_file = './data/weights/{}.weights'.format(model_name)
+            self.header = self.load_weights(weight_file)
             self.seen = self.header[3]
 
     def forward(self, data):
@@ -356,8 +362,8 @@ class YOLOv3(nn.Module):
 
         return detections
 
-    def load_weights(self, model_name):
-        file = open('./data/weights/{}.weights'.format(model_name), 'rb')
+    def load_weights(self, weight_file):
+        file = open(weight_file, 'rb')
         header = torch.from_numpy(np.fromfile(file, dtype=np.int32, count=5))
         for i, module in enumerate(self.modules_list):
 

@@ -50,7 +50,7 @@ def test_yolo_learner():
     data = COCO_load('/home/marni/COCO/', train_annot='/home/marni/COCO/annotations/instances_train2017_clipped.json',
                      valid_annot='/home/marni/COCO/annotations/instances_val2017_clipped.json', tfms=tfms, resize=128)
     learner = yolo_learner(data)
-    learner.predict()
+    learner.predict(confidence=0.2)
     #print(learner.prediction)
-    learner.show_results(num=2)
+    learner.show_results(num=6, rows=2)
 
