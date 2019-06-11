@@ -1,6 +1,7 @@
 import pytest
-from ..fastai.vision.models.yolov3 import *
+from fastai.vision.models.yolov3 import *
 import torch
+import random
 
 
 @pytest.mark.parametrize("model", {"test/test_parse"})
@@ -56,14 +57,32 @@ def test_get_IoUs(bboxes):
     print(result)
 
 
-@pytest.mark.parametrize("pretrained", {False})
+def test_rewrite_bboxes(n=5, b=6):
+    bboxes = torch.zeros(n, b, 4)
+    classes = torch.zeros(n, b)
+    nonzeros = []
+    for image, c in zip(bboxes, classes):
+        non = random.sample(range(b), random.randrange(0, b))
+        nonzeros.append(len(non))
+        image[non] = torch.rand(len(non), 4)
+        c[non] = torch.Tensor(random.sample(range(1, 10), len(non)))
+    result = rewrite_bboxes(bboxes, classes)
+    for i, (image, non) in enumerate(zip(result, nonzeros)):
+        assert image[1].size(0) == non
+
+
+@pytest.mark.parametrize("pretrained", {True})
 def test_YOLOv3(pretrained, width=128, height=128, batch_size=2):
     model_name = 'yolov3'
     image = torch.randn([batch_size, 3, width, height])
     net = YOLOv3(model_name, pretrained=pretrained)
+    print(len(net.modules_list))
+    print(net.modules_list[0][0].weight[-1])
+    '''
     detection = net(image)
     # assert detection.shape == torch.Size([batch_size, 22743, 85])
     print(len(detection))
     print(type(detection))
     print(detection[0].shape)
     print(detection[1].shape)
+    '''
