@@ -31,7 +31,7 @@ def download_tab():
     ], 
         className='block',
         style={
-            'padding': '5%', 
+            'padding': '50', 
             'width': '60%',
         }
     )
@@ -48,9 +48,11 @@ def download_tab():
             value=None),
         html.Div(id='show-coco-img'),
     ],
-        style={'width': '80%'})
+        className='block',
+        style={'width': '80%'}
+        )
     
-    return [html.Div(coco_download, style={'width': '50%', 'display': 'inline-block'}), html.Div(coco_show, style={'width': '50%', 'display': 'inline-block'})]
+    return [html.Div(coco_download, style={'padding': '50', 'min-width': '800px'}), html.Div(coco_show, style={'padding': '50', 'min-width': '800px'})]
     
     
 def model_tab():

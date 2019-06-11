@@ -29,4 +29,11 @@ body{
 
 .block{
     text-align: center;
+    display: inline-block;
+}
+
+.content{
+    display: flex;
+    flex-direction: row;
+    margin: 2% 3%;
 }

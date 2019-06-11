@@ -24,9 +24,11 @@ app.layout = html.Div(children=[
                 ],
                 value="download_tab",
             )
-    ], className="row tabs_div"
+    ], className="tabs_div"
     ),
-    html.Div(id="tab_content", className="row", style={"margin": "2% 3%"}),
+    html.Div(id="tab_content", 
+             className="content", 
+             style={}),
     
 ])
 

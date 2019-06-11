@@ -23,7 +23,6 @@ def update_output(list_of_contents, list_of_names, list_of_dates):
         return parse_contents(list_of_contents, list_of_names, list_of_dates)
     
 def parse_contents(contents, filename, date):
-    print(contents)
     return html.Div([
         html.H5(filename),
         html.Img(src=contents)
@@ -49,7 +48,7 @@ def show_coco(value):
         name = value.split('/')[-1]
         encoded_image = base64.b64encode(open(value, 'rb').read())
         pls = str(encoded_image)[2:-1]
-        print('data:image/jpeg;base64,{}'.format(pls))
+#         print('data:image/jpeg;base64,{}'.format(pls))
         return html.Div([
             html.H5(name),
             html.Img(src='data:image/jpeg;base64,{}'.format(pls))
