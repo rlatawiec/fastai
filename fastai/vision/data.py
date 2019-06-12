@@ -6,15 +6,214 @@ from ..data_block import *
 from ..basic_data import *
 from ..layers import *
 from .learner import *
+from ..core import *
 from torchvision import transforms as tvt
+from . import *
+import os
+import json
+import torch
+from torch.utils.data import Dataset
+from pathlib import Path
+from zipfile import ZipFile
+import urllib.request
+import random
+from skimage import io, transform
 
-__all__ = ['get_image_files', 'denormalize', 'get_annotations', 'ImageDataBunch',
+__all__ = ['COCO_download', 'COCO_load', 'get_image_files', 'denormalize', 'get_annotations', 'ImageDataBunch',
            'ImageList', 'normalize', 'normalize_funcs', 'resize_to',
            'channel_view', 'mnist_stats', 'cifar_stats', 'imagenet_stats', 'download_images',
            'verify_images', 'bb_pad_collate', 'ImageImageList', 'PointsLabelList',
-           'ObjectCategoryList', 'ObjectItemList', 'SegmentationLabelList', 'SegmentationItemList', 'PointsItemList']
+           'ObjectCategoryList', 'ObjectItemList', 'SegmentationLabelList', 'SegmentationItemList', 'PointsItemList',
+           'clip_annotations', 'COCODataset', 'LoadVideo']
 
 image_extensions = set(k for k,v in mimetypes.types_map.items() if v.startswith('image/'))
+
+
+def COCO_download(root_dir=str(os.getcwd()), destiny_folder="COCO", dataset=None, category=None, random_train=None,
+                  random_valid=None,
+                  annot_link='http://images.cocodataset.org/annotations/annotations_trainval2017.zip'):
+    '''
+    Download COCO annotations and image sets, either all or specific classes.
+    Args:
+        root_dir (string): path where the COCO database will be stored.
+        destiny_folder (string): name of folder to which download COCO database.
+        dataset (string): either 'all', 'train', or 'valid' - determines which image set will be downloaded.
+        category (list): if list of categories provided, only images of those categories will be downloaded.
+        random_train (int): number of images to download from training set.
+        random_valid (int): number of images to download from validation set.
+        annot_link (string): URL to COCO annotations.
+    '''
+    os.makedirs('{}/{}'.format(root_dir, destiny_folder), exist_ok=True)
+    path = '{}/{}'.format(root_dir, destiny_folder)  # go to COCO directory
+    if os.path.isfile('{}/{}'.format(path, annot_link.split('/')[-1])):
+        print('Found annotations zip.')
+        pass
+    elif os.path.isdir('{}/annotations'.format(path)):
+        print('Found annotations folder.')
+        pass
+    else:
+        print('No annotations found, downloading.')
+        urllib.request.urlretrieve(annot_link, '{}/{}'.format(path, annot_link.split('/')[-1]))
+    try:
+        zip_ref = ZipFile('{}/{}'.format(path, annot_link.split('/')[-1]), 'r')
+        zip_ref.extractall(path)
+        zip_ref.close()
+        os.remove('{}/{}'.format(path, annot_link.split('/')[-1]))
+    except FileNotFoundError:
+        pass
+    datasets = make_dataset_dirs(dataset, path)
+    for i in datasets:
+        if i == 'train':
+            path2 = '{}/annotations'.format(path)
+            for i2 in os.listdir(path2):
+                if os.path.isfile(os.path.join(path2, i2)) and 'instances_train' in i2:
+                    train_annot = '{}/{}'.format(path2, i2)
+                    print('Found train annotations in {}'.format(train_annot))
+                    break
+            with open(train_annot, 'r') as file:
+                annots = json.load(file)
+            random_sample = random_train
+        else:
+            path2 = '{}/annotations'.format(path)
+            for i2 in os.listdir(path2):
+                if os.path.isfile(os.path.join(path2, i2)) and 'instances_val' in i2:
+                    val_annots = '{}/{}'.format(path2, i2)
+                    print('Found validation annotations in {}'.format(val_annots))
+                    break
+            with open(val_annots, 'r') as file:
+                annots = json.load(file)
+            random_sample = random_valid
+        print('Getting images urls.')
+        images_to_download = get_image_urls_and_names(annots, random_sample, category)
+        print(
+            'Downloading {} {} images to {}. Images in destination folder with same name will NOT be replaced.'.format(
+                len(images_to_download), i, '{}/{}/{}'.format(root_dir, destiny_folder, i)))
+        path3 = '{}/{}/{}'.format(root_dir, destiny_folder, i)
+        onlyfiles = [f for f in os.listdir(path3) if os.path.isfile(os.path.join(path3, f))]
+        for k in onlyfiles: images_to_download.pop(k, None)
+        found_in_folder = len(onlyfiles)
+        for file_name in images_to_download:
+            urllib.request.urlretrieve(images_to_download[file_name], '{}/{}'.format(path3, file_name))
+        print(
+            'Downloaded {} images, {} images were already in folder.'.format(len(images_to_download), found_in_folder))
+
+
+def get_image_urls_and_names(annots, random_sample, category=None):
+    '''
+    Filters loaded JSON COCO annotations and returns dict of image_name:coco_url_to_image.
+    Args:
+        annots (JSON): Loaded COCO-like annotions in JSON format.
+        random_sample (int): Number of images to download.
+    '''
+    categories = {i['id']: i['name'] for i in annots['categories']}
+    images = {i['id']: [i['file_name'], i['coco_url']] for i in annots['images']}
+    annotations = [[i['image_id'], i['category_id']] for i in annots['annotations']]
+    chosen_images = dict()
+    for annotation in annotations:
+        corr_image = images[annotation[0]]
+        if category is not None:
+            if categories[annotation[1]] not in category:
+                continue
+        chosen_images[corr_image[0]] = corr_image[1]
+    if random_sample:
+        if random_sample <= len(chosen_images):
+            chosen_images = dict(random.sample(chosen_images.items(), random_sample))
+    return chosen_images
+
+
+def make_dataset_dirs(dataset_command, path):
+    """
+    Prepare COCO catalogue structure - make folders if they not exist.
+    Args:
+        dataset_command (string): Defines dataset for which the folders will be made.
+        path (string): Path to place where folders will be created.
+    """
+    if dataset_command is None:
+        print('No datasets selected.')
+    else:
+        if dataset_command == 'all':
+            os.makedirs('{}/train'.format(path), exist_ok=True)
+            os.makedirs('{}/valid'.format(path), exist_ok=True)
+            return ['train', 'valid']
+        elif dataset_command == 'train':
+            os.makedirs('{}/train'.format(path), exist_ok=True)
+            return ['train']
+        elif dataset_command == 'valid':
+            os.makedirs('{}/valid'.format(path), exist_ok=True)
+            return ['valid']
+        else:
+            print('Invalid dataset - enter either all, train or valid.')
+            return []
+
+
+def COCO_load(root_dir, train_annot=False, valid_annot=False, tfms=[], resize=608, batch_size=4):
+    """
+    Args:
+        root_dir (string): Path to the directory with train and valid folders.
+        train_annot (string): Path to the COCO-style json file with annotations for training image set.
+        valid_annot (string): Path to the COCO-style json file with annotations for validation image set.
+        tfms (get_transforms() function): Optional transformations to be applied to images.
+        resize (int): Size to which all images will be resized. Also resizes bounding boxes.
+        batch_size (int): How many images we load and use at once.
+    """
+    if not train_annot:
+        path = '{}/annotations'.format(root_dir)
+        for i in os.listdir(path):
+            if os.path.isfile(os.path.join(path, i)) and 'instances_train' in i:
+                train_annot = '{}/{}'.format(path, i)
+                print('Found train annotations in {}'.format(train_annot))
+    if not valid_annot:
+        path = '{}/annotations'.format(root_dir)
+        for i in os.listdir(path):
+            if os.path.isfile(os.path.join(path, i)) and 'instances_val' in i:
+                valid_annot = '{}/{}'.format(path, i)
+                print('Found validation annotations in {}'.format(valid_annot))
+
+    with open(train_annot) as tr:
+        coco_train = COCODataset(json.load(tr))
+    with open(valid_annot) as vl:
+        coco_valid = COCODataset(json.load(vl))
+
+    boxes = coco_train.get_bboxes()
+    boxes2 = coco_valid.get_bboxes()
+    boxes.update(boxes2)
+    get_y_func = lambda o: \
+        boxes[Path(o).name]  # input dict is being transformed during pipeline, thats why it operates on Path objects
+
+    all_objects = (ObjectItemList.from_folder(root_dir).split_by_folder()
+                   .label_from_func(get_y_func)
+                   .transform(tfms, tfm_y=True, size=resize)
+                   .databunch(bs=batch_size, collate_fn=bb_pad_collate))
+    return all_objects
+
+
+def clip_annotations(images_path, annotations_file):
+    images = os.listdir(images_path)
+    towrite = {}
+    with open(annotations_file) as file:
+        annots = json.load(file)
+    towrite['info'] = annots['info']
+    towrite['licenses'] = annots['licenses']
+    towrite['images'] = []
+    ids = set()
+    removed = [0, 0]
+    for im in annots['images']:
+        if im['file_name'] in images:
+            towrite['images'].append(im)
+            ids.add(im['id'])
+        else:
+            removed[0] += 1
+    towrite['annotations'] = []
+    for an in annots['annotations']:
+        if an['image_id'] in ids:
+            towrite['annotations'].append(an)
+        else:
+            removed[1] += 1
+    towrite['categories'] = annots['categories']
+    with open('{}_clipped.json'.format(annotations_file[:-5]), 'w') as file:
+        json.dump(towrite, file)
+    print('Clipped json file was written to file! {} images and {} annotations were removed'.format(*removed))
+
 
 def get_image_files(c:PathOrStr, check_ext:bool=True, recurse=False)->FilePathList:
     "Return list of files in `c` that are images. `check_ext` will filter to `image_extensions`."
@@ -431,6 +630,121 @@ class ImageImageList(ImageList):
             z.show(ax=axs[i,1], **kwargs)
 
 
+class LoadVideo:
+    '''
+    Class for loading video frames as tensors.
+    '''
+
+    def __init__(self, video_path):
+        '''
+        Args:
+            video_path(str): Path to video file.
+        '''
+        self.video = cv2.VideoCapture(video_path)
+        self.last_frame = None
+
+    def get_frame(self, x=608, y=608):
+        '''
+        Returns next resized frame from the video as a tensor.
+        Args:
+            size(int): Size to resize the frame to, 608 by default.
+        '''
+        if self.video.isOpened():
+            success, image = self.video.read()
+            if success is False:
+                self.video.release()
+                cv2.destroyAllWindows()
+                return None
+            self.last_frame = image
+            return torch.from_numpy(transform.resize(image, (x, y))).float()
+        else:
+            return None
+
+    def get_fps(self):
+        """
+        Return framerate of the video.
+        """
+        return self.video.get(cv2.CAP_PROP_FPS)
+
+    def get_resolution(self):
+        """
+        Return resolution of the video.
+        """
+        return (int(self.video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(self.video.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+
+    def check_last_frame_sum(self):
+        """
+        Check if last read frame was not all black.
+        """
+        if self.last_frame is not None:
+            return self.last_frame.sum()
+        else:
+            return None
+
+    def get_last_frame_resized(self, x=608, y=608):
+        """
+        Get last read frame in form of a tensor resized to given resolution.
+        :param x: Width to resize image to.
+        :param y: Height to resize image to.
+        :return:
+        """
+        return torch.from_numpy(transform.resize(self.last_frame, (x, y))).float()
+
+    def __len__(self):
+        return int(self.video.get(cv2.CAP_PROP_FRAME_COUNT))
+
+
+class COCODataset(Dataset):
+    """Common Objects in Context dataset."""
+
+    def __init__(self, json_file):
+        """
+        Args:
+            json_file (string): Loaded JSON file with annotations.
+        """
+        self.json = json_file
+        self.images = {self.json['images'][i]['id']: self.json['images'][i] for i in range(len(self.json['images']))}
+        self.bbox = {self.json['annotations'][i]['id']: self.json['annotations'][i] for i in
+                     range(len(self.json['annotations']))}
+        self.images_ids = list(self.images.keys())
+        self.image_id_to_bbox_id = {}
+        for i in self.bbox:
+            try:
+                self.image_id_to_bbox_id[self.bbox[i]['image_id']].append(i)
+            except:
+                self.image_id_to_bbox_id[self.bbox[i]['image_id']] = [i]
+        for anomaly in set(self.images_ids).difference(set(self.image_id_to_bbox_id.keys())):
+            self.image_id_to_bbox_id[anomaly] = []
+
+        self.images_ids = list(self.images.keys())
+        self.categories = {i['id']: i['name'] for i in self.json['categories']}
+
+    def coco_bbox_to_fastai(self, bb):
+        return np.array([bb[1], bb[0], bb[3] + bb[1] - 1, bb[2] + bb[0] - 1])
+
+    def get_bboxes(self):
+        """
+        Dict of image names with corresponding bounding boxes.
+        """
+        all_bboxes = []
+        image_names = []
+        for image_id in self.images_ids:
+            img_name = self.images[image_id]['file_name']
+            bboxes_ids = self.image_id_to_bbox_id[image_id]
+            bboxes = []
+            labels = []
+            for i in bboxes_ids:
+                current_box = self.bbox[i]
+                bboxes.append(self.coco_bbox_to_fastai(current_box['bbox']))
+                labels.append(self.categories[current_box['category_id']])
+            for i in bboxes: i = [int(k) for k in i]
+            all_bboxes.append([bboxes, labels])
+            image_names.append(img_name)
+        return dict(zip(image_names, all_bboxes))
+
+    def __len__(self):
+        return len(self.images)
+
 def _ll_pre_transform(self, train_tfm:List[Callable], valid_tfm:List[Callable]):
     "Call `train_tfm` and `valid_tfm` after opening image, before converting from `PIL.Image`"
     self.train.x.after_open = compose(train_tfm)
@@ -454,4 +768,3 @@ LabelLists.pre_transform = _ll_pre_transform
 DataBunch.pre_transform = _db_pre_transform
 LabelLists.presize = _presize
 DataBunch.presize = _presize
-

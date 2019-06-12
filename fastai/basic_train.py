@@ -121,6 +121,7 @@ def _loss_func_name2activ(name:str, axis:int=-1):
     return res
 
 def _loss_func2activ(loss_func):
+    print('loss_func: {}'.format(type(loss_func)))
     if getattr(loss_func,'keywords',None):
         if not loss_func.keywords.get('log_input', True): return
     axis = getattr(loss_func, 'axis', -1)

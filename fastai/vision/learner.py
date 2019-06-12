@@ -9,7 +9,7 @@ from ..layers import *
 from ..callbacks.hooks import *
 from ..train import ClassificationInterpretation
 
-__all__ = ['cnn_learner', 'create_cnn', 'create_cnn_model', 'create_body', 'create_head', 'unet_learner']
+__all__ = ['cnn_learner', 'create_cnn', 'create_cnn_model', 'create_body', 'create_head', 'unet_learner', 'yolo_learner']
 # By default split models between first and second layer
 def _default_split(m:nn.Module): return (m[1],)
 # Split a resnet style model
@@ -206,3 +206,89 @@ def _learner_interpret(learn:Learner, ds_type:DatasetType=DatasetType.Valid, tta
     "Create a `ClassificationInterpretation` object from `learner` on `ds_type` with `tta`."
     return ClassificationInterpretation.from_learner(learn, ds_type=ds_type, tta=tta)
 Learner.interpret = _learner_interpret
+
+
+def yolo_learner(data:DataBunch, loss_func=None, model_name:str='yolov3', pretrained:bool=True, **learn_kwargs:Any)->Learner:
+    "Build YOLOv3 learner from `data`."
+
+    model = models.YOLOv3(model_name, pretrained=pretrained)
+    learn = Yolo_Learner(data, model)
+    return learn
+
+
+class Yolo_Learner():
+
+    def __init__(self, data, model):
+
+        self.data = data
+        self.model = model
+        self.classes = {number: name for name, number in data.train_dl.y.c2i.items()}
+
+    def predict(self, images=None, confidence=0.5, nms_conf=0.4):
+
+        self.prediction = []
+        if images is None:
+            print('Prediction of images from valid dataset')
+            num_images = 0
+            for x, y in self.data.valid_dl:
+                self.prediction += models.rewrite_results(self.model(x), confidence, nms_conf, nonzero_only=True)
+                num_images += x.size(0)
+        else:
+            num_images = images.size(0)
+            self.prediction += models.rewrite_results(self.model(images), confidence, nms_conf, nonzero_only=True)
+
+        self.images = images
+
+        print('Predicted {} images'.format(num_images))
+
+    def show_results(self, num=100, rows=3, figsize=(5, 5)):
+
+        num_images = [len(batch) for batch in self.prediction]
+        if self.images is None:
+            if len(self.data.valid_ds.y) > num:
+                self.plot_batch([self.data.valid_ds.x[i] for i in range(num)],
+                                [self.data.valid_ds.y[i] for i in range(num)], self.prediction[:num], rows, figsize)
+            else:
+                self.plot_batch(self.data.valid_ds.x, self.data.valid_ds.y, self.prediction, rows, figsize)
+        else:
+            if sum(num_images) > num:
+                self.plot_batch(self.images[:num, :, :, :], [None]*num, [self.prediction[0][:num, :, :]], rows, figsize)
+            else:
+                self.plot_batch(self.images, [None]*num_images[0], self.prediction, rows, figsize)
+
+    def plot_batch(self, x, y, preds, rows, figsize):
+
+        import matplotlib.pyplot as plt
+
+        if rows > len(x):
+            rows = len(x)
+        cols = math.ceil(len(x) / rows)
+        fig, axs = plt.subplots(rows, cols)
+        try:
+            axs = [a for aa in axs for a in aa]
+        except TypeError:
+            pass
+        for image, target, predictions, ax in zip(x, y, preds, axs[:len(x)]):
+            ax.imshow(image.data.transpose(0, 2).transpose(0, 1))
+            # colors = iter(plt.cm.rainbow(np.linspace(0, 1, len(predictions))))
+            self.plot_boxes(*predictions, ax, color='orange')
+            if target is not None:
+                self.plot_boxes(*target.data, ax, color='green', constant_conf=1)
+        plt.show()
+
+    def plot_boxes(self, boxes, classes, ax, color='blue', constant_conf=None):
+
+        import matplotlib.patches as patches
+
+        if boxes.size(0) == 0:
+            return 0
+        for box, class_ in zip(boxes, classes):
+            # color = next(colors)
+            if constant_conf is not None:
+                rect = patches.Rectangle((box[0]-box[2]/2, box[1]-box[3]/2), box[2], box[3], linewidth=2*constant_conf,
+                                         edgecolor=color, facecolor='none')
+            else:
+                rect = patches.Rectangle((box[0]-box[2]/2, box[1]-box[3]/2), box[2], box[3], linewidth=2*box[4],
+                                         edgecolor=color, facecolor='none')
+            ax.add_patch(rect)
+            ax.text(box[0]-box[2]/2, box[1]-box[3]/2, self.classes[int(class_)], color=color)
